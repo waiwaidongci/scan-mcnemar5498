@@ -25,15 +25,28 @@ export async function results(route, refresh) {
       .catch(error=>{if(status.isConnected) status.textContent=error.message;});
     return panel(job.name,pill(STATUS[job.status],job.status),status,button('刷新',{class:'quiet',onClick:refresh}));
   }
-  const download = button('下载结果 CSV',{class:'quiet','data-testid':'export',onClick:event=>
-    handler(download,message,()=>workspace.download(`/runs/${job.id}/export`,`${spec.short_name}-${job.id}.csv`))(event)});
+  const download = job.has_export ? button('下载结果 CSV',{class:'quiet','data-testid':'export',onClick:event=>
+    handler(download,message,()=>workspace.download(`/runs/${job.id}/export`,`${spec.short_name}-${job.id}.csv`))(event)}) : null;
   const history = el('label',{class:'field run-picker',for:'run-picker'},el('span',{},'切换运行记录'),
     el('select',{id:'run-picker',onChange:event=>{location.hash=`#results/${event.target.value}`;}},
       (runs.some(item=>item.id===job.id) ? runs : [job,...runs]).map(item=>el('option',{value:item.id,selected:item.id===job.id},item.name))));
   const result = job.result;
+  const selection = result?.selection;
+  const stale = job.error && result && job.status === 'failed'
+    ? el('p', {class:'feedback', role:'alert'},
+        `本次发布失败：${job.error}。页面与导出仍保留上一次成功发布的同份方案。`)
+    : null;
   const analysis = result ? el('section',{class:'analysis','data-testid':'analysis-complete'},
     el('div',{class:'result-head'},p(job.name,'eyeline'),h(2,result.headline),p(result.note,'intro-copy'),
       el('div',{class:'actions'},pill(STATUS[job.status],job.status),download,message)),
+    stale,
+    selection && panel('整批试用 B 方案', p(selection.headline,'intro-copy'), p(selection.note),
+      el('dl',{class:'dictionary'},
+        el('div',{},el('dt',{},'入选批次'),el('dd',{},selection.batch_ids.length ? selection.batch_ids.join('、') : '无（继续使用 A）')),
+        el('div',{},el('dt',{},'入选票数 / 预算'),el('dd',{},`${selection.documents} / ${selection.budget}`)),
+        el('div',{},el('dt',{},'净增票数'),el('dd',{},`${selection.net > 0 ? '+' : ''}${selection.net}`)),
+        ...Object.entries(selection.usage).map(([name,used]) =>
+          el('div',{},el('dt',{},`${name} · 仅 A 通过`),el('dd',{},`${used} / ${selection.limits[name]}`))))),
     metrics(result.metrics),
     result.charts.map(plot),
     (result.sections || []).map(item=>panel(item.title,p(item.text))),

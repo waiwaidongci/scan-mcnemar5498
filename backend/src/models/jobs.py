@@ -50,3 +50,12 @@ class Delivery(Base):
     state: Mapped[str] = mapped_column(String(20))
     detail: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(default=now)
+
+class RunCheckpoint(Base):
+    """可续跑的筛选前沿。记录产生它的尝试编号，旧尝试不得回写。"""
+    __tablename__ = 'run_checkpoints'
+
+    run_id: Mapped[int] = mapped_column(ForeignKey('runs.id'), primary_key=True)
+    attempt: Mapped[int] = mapped_column(default=0)
+    payload: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(default=now)

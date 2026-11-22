@@ -4,7 +4,15 @@ from collections import Counter
 from decimal import Decimal, localcontext
 from fractions import Fraction
 
-from .spec import SPEC
+from . import selection
+from .spec import SPEC, selection_limits
+
+
+def _type_order():
+    for field in SPEC["fields"]:
+        if field["key"] == "document_type":
+            return list(field["options"])
+    return []
 
 
 def validate_rows(rows):
@@ -81,7 +89,7 @@ def _table(title, columns, rows):
     }
 
 
-def analyze(rows, normalized_params):
+def analyze(rows, normalized_params, checkpoint=None, progress=None):
     documents = validate_rows(rows)
     options = _run_parameters(normalized_params)
     counts = Counter((row["a_pass"], row["b_pass"]) for row in documents)
@@ -106,6 +114,23 @@ def analyze(rows, normalized_params):
     ]
     failed_gates = [label for label, _, _, passed in gates if not passed]
 
+    type_order = _type_order()
+    batches = selection.aggregate(documents, type_order)
+    plan = selection.best_selection(batches, options["selection_budget"],
+                                    selection_limits(options), type_order,
+                                    checkpoint=checkpoint, progress=progress)
+    if plan["effective"]:
+        selection_headline = (
+            f"建议整批试用 B：入选 {len(plan['batch_ids'])} 批、{plan['documents']} 张，"
+            f"净增 {plan['net']} 张（仅 B {plan['b_only']}、仅 A {plan['a_only']}）。")
+        selection_note = "组合在预算与各票种上限内净增最大；同分已按总票数最少、批次编号顺序取舍。"
+    else:
+        selection_headline = "无正收益组合，整批继续使用 A。"
+        selection_note = "所有满足预算与上限的组合净增都不为正，因此不切换任何批次。"
+
+    failed_gates = failed_gates + ([] if plan["effective"] else ["试用组合正收益"])
+    result_ready = not failed_gates
+
     disagreements = []
     for document in sorted(documents, key=lambda row: (row["b_pass"], row["document_id"])):
         if document["a_pass"] == document["b_pass"]:
@@ -128,15 +153,33 @@ def analyze(rows, normalized_params):
         note += "本批两引擎逐单判定一致，差异对为 0，p 值记为 1。"
 
     return {
-        "state": "warning" if failed_gates else "ok",
+        "state": "ok" if result_ready else "warning",
+        "ready": result_ready,
         "headline": headline,
         "note": note,
+        "selection": {
+            "headline": selection_headline,
+            "note": selection_note,
+            "batch_ids": plan["batch_ids"],
+            "documents": plan["documents"],
+            "net": plan["net"],
+            "a_only": plan["a_only"],
+            "b_only": plan["b_only"],
+            "budget": plan["budget"],
+            "usage": plan["usage"],
+            "limits": plan["limits"],
+            "effective": plan["effective"],
+        },
         "metrics": [
             {"label": "有效配对数", "value": pair_count, "detail": f"差异对 {a_only + b_only} 对"},
             {"label": "现用 A 通过率", "value": f"{a_pass / pair_count:.2%}", "detail": f"{a_pass}/{pair_count} 对"},
             {"label": "候选 B 通过率", "value": f"{b_pass / pair_count:.2%}", "detail": f"{b_pass}/{pair_count} 对"},
             {"label": "候选 B 净增（百分点）", "value": gain_text, "detail": f"仅 B 通过 {b_only} 对，减仅 A 通过 {a_only} 对"},
             {"label": "双侧精确 p 值", "value": p_text, "detail": f"显著性水平 α = {alpha}"},
+            {"label": "试用入选批次", "value": len(plan["batch_ids"]),
+             "detail": "、".join(plan["batch_ids"]) or "无（继续使用 A）"},
+            {"label": "试用入选票数", "value": plan["documents"],
+             "detail": f"预算 {plan['budget']} 张，净增 {plan['net']} 张"},
         ],
         "tables": [
             _table("配对四格表", (("a", "现用 A"), ("b_pass", "候选 B 通过"), ("b_fail", "候选 B 未通过")), [
@@ -151,6 +194,13 @@ def analyze(rows, normalized_params):
                 ("document_id", "票据编号"), ("batch_id", "扫描批次"), ("document_type", "票据类型"),
                 ("outcome", "配对判定"), ("next_step", "复核动作"),
             ), disagreements),
+            _table("批次入选组合", (
+                ("batch_id", "扫描批次"), ("documents", "票数"), ("a_only", "仅 A 通过"),
+                ("b_only", "仅 B 通过"), ("net", "净增"), ("selected", "入选试用 B"),
+            ), plan["batches"]),
+            _table("入选用量核对", (
+                ("item", "资源"), ("used", "已用"), ("limit", "上限"), ("remaining", "剩余"),
+            ), plan["usage_rows"]),
         ],
         "charts": [{
             "title": "四类配对判定",
@@ -166,9 +216,16 @@ def analyze(rows, normalized_params):
                 f"仅 A 通过 {a_only} 对，仅 B 通过 {b_only} 对。双侧检验只用这 {a_only + b_only} 个差异对。"
                 "门槛判断使用舍入前的精确数值。未达到显著性门槛表示当前证据不足以确认差异。"
             )},
+            {"title": "整批试用组合", "text": (
+                f"{selection_headline}{selection_note}"
+                f"入选总票数 {plan['documents']}/{plan['budget']}，"
+                + "、".join(f"{name}仅 A 通过 {plan['usage'][name]}/{plan['limits'][name]}"
+                           for name in plan["usage"])
+                + "。"
+            )},
             {"title": "复核与交付", "text": (
                 "先核对仅 A 通过的票据，再抽核仅 B 通过的票据。按票据编号回看影像与人工底单，"
-                "补录复核决定后导出配对四格表、门槛判断和差异清单。"
+                "补录复核决定后导出配对四格表、门槛判断、入选组合和差异清单。"
             )},
         ],
     }

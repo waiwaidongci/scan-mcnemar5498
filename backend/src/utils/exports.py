@@ -18,8 +18,21 @@ def write_report(run_id, attempt, result):
         writer = csv.writer(output)
         writer.writerow([safe_cell(result['headline'])])
         writer.writerow([safe_cell(result.get('note', ''))])
-        for metric in result['metrics']:
-            writer.writerow([safe_cell(metric['label']), safe_cell(metric['value']), safe_cell(metric.get('detail', ''))])
+        selection = result.get('selection')
+        if selection:
+            writer.writerow([])
+            writer.writerow([safe_cell('整批试用 B 方案')])
+            writer.writerow([safe_cell(selection['headline'])])
+            writer.writerow([safe_cell('入选批次'), safe_cell('、'.join(selection['batch_ids']) or '无（继续使用 A）')])
+            writer.writerow([safe_cell('入选票数 / 预算'),
+                             safe_cell(f"{selection['documents']} / {selection['budget']}")])
+            for metric in result['metrics']:
+                writer.writerow([safe_cell(metric['label']), safe_cell(metric['value']),
+                                 safe_cell(metric.get('detail', ''))])
+        else:
+            for metric in result['metrics']:
+                writer.writerow([safe_cell(metric['label']), safe_cell(metric['value']),
+                                 safe_cell(metric.get('detail', ''))])
         for table in result['tables']:
             writer.writerow([])
             writer.writerow([safe_cell(table['title'])])

@@ -30,6 +30,8 @@ SPEC = {
         "原假设为两引擎边际通过率相同。给定 d=b+c，双侧精确 p 值为 min(1, 2×P[X≤min(b,c)])，其中 X~Binom(d, 0.5)。无差异对时 p=1。",
         "B 相对 A 的净增为 100×(c−b)/有效配对数，单位为百分点。有效配对数达到下限、p≤α、B 净增达到下限且方向为正时，判定达到统计验收门槛。",
         "未达到显著性门槛时，当前数据不足以确认通过率存在差异。达标结论仍需与逐单复核结果一同交付。",
+        "试用切换按扫描批次整批入选：入选总票数不超过预算，各票种仅 A 通过票数不超过各自上限。",
+        "入选组合先取通过票数净增（仅 B 通过减仅 A 通过）最大者；同分取入选总票数最少者，再按批次编号序列排序取较小者。最大净增不为正时不做切换，全部继续使用 A。",
     ],
     "sample_name": "澄石票据双引擎配对_20261121.csv",
     "default_dataset": "澄石零售 11 月 21 日双引擎票据扫描验收",
@@ -58,3 +60,38 @@ SPEC = {
     "fixture": {"alpha": 0.05, "min_pairs": 30, "min_gain_pp": 20},
     "axes": "横轴为配对结果的四个类别，纵轴为票据配对数。",
 }
+
+SELECTION_LIMITS = {
+    "budget": {"key": "selection_budget", "label": "入选总票数预算", "type": "int", "required": True,
+               "min": 0, "max": 100000, "default": 64,
+               "help": "整批入选的票据总数不得超过该预算。"},
+    "cap_prefix": "selection_cap_",
+}
+
+
+def _selection_params():
+    """预算加每个票种一个「仅 A 通过」上限，票种顺序取自字段定义。"""
+    params = [SELECTION_LIMITS["budget"]]
+    for index, option in enumerate(SPEC["fields"][2]["options"]):
+        params.append({
+            "key": f'{SELECTION_LIMITS["cap_prefix"]}{index}',
+            "label": f"{option}仅 A 通过上限",
+            "type": "int",
+            "required": True,
+            "min": 0,
+            "max": 100000,
+            "default": 10,
+            "help": f"入选批次中「{option}」仅 A 通过的票数不得超过该上限。",
+            "document_type": option,
+        })
+    return params
+
+
+SPEC["params"].extend(_selection_params())
+
+
+def selection_limits(params):
+    """从运行参数取出各票种仅 A 通过上限。"""
+    return {defn["document_type"]: params[defn["key"]]
+            for defn in SPEC["params"] if defn.get("document_type")}
+

@@ -21,7 +21,7 @@ export async function deliveryPage(route, refresh) {
         workspace.download(`/runs/${row.id}/export`,`${spec.short_name}-${row.id}.csv`)));
       return download;
     }},
-  ], runs.filter(row=>row.status==='complete'), {caption:'可导出的结果', empty:'完成计算后会生成对应的报告。'});
+  ], runs.filter(row=>row.status==='complete' || row.has_export), {caption:'可导出的结果', empty:'完成计算后会生成对应的报告。'});
   const delivery = spec.scheduled ? panel('站内分发回执', table([
     {key:'recipient',label:'收件团队'},
     {label:'回执',render:row=>pill(row.state==='delivered'?'已投递':'已拦截',row.state)},
